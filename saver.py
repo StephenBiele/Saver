@@ -66,7 +66,7 @@ def extract_text(html: str) -> str:
 
 def fetch_text(url: str, max_chars: int = 8000) -> str:
     headers = {"User-Agent": "Mozilla/5.0 (compatible; saver-bot/1.0)"}
-    r = requests.get(url, headers=headers, timeout=15)
+    r = requests.get(url, headers=headers, timeout=15, verify=False)
     r.raise_for_status()
     ct = r.headers.get("content-type", "")
     if "html" in ct:

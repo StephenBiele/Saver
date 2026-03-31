@@ -23,12 +23,7 @@ def save():
     if SECRET:
         token = request.headers.get("X-Secret", "")
         if token != SECRET:
-            return jsonify({
-                "error": "unauthorized",
-                "secret_repr": repr(SECRET),
-                "token_repr": repr(token),
-                "match": token == SECRET,
-            }), 401
+            return jsonify({"error": "unauthorized"}), 401
 
     data = request.get_json(silent=True) or {}
     url = data.get("url") or request.form.get("url") or request.args.get("url")
@@ -47,18 +42,6 @@ def save():
 def health():
     return jsonify({"status": "ok"}), 200
 
-
-@app.get("/debug-secret")
-@app.post("/debug-secret")
-def debug_secret():
-    token = request.headers.get("X-Secret", "")
-    return jsonify({
-        "secret_len": len(SECRET),
-        "secret_repr": repr(SECRET),
-        "received_token_repr": repr(token),
-        "match": token == SECRET,
-        "method": request.method,
-    }), 200
 
 
 if __name__ == "__main__":
