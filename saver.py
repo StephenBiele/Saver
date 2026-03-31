@@ -88,7 +88,9 @@ GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-f
 def summarize(text: str, api_key: str):
     prompt = (
         "You are a helpful assistant. Given the following web page content, "
-        "return ONLY a JSON object with two keys:\n"
+        "return ONLY a JSON object with three keys:\n"
+        '  "title": a headline in "[Category] - Topic" format, max 100 characters '
+        '(e.g. "Cybersecurity - New Attack Targets npm Package axios")\n'
         '  "summary": a 2-3 sentence summary of the page\n'
         '  "tags": a list of 3-5 short relevant tags (lowercase, no # symbol)\n\n'
         f"Content:\n{text}\n\n"
@@ -103,9 +105,10 @@ def summarize(text: str, api_key: str):
     raw = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
     raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.DOTALL).strip()
     data = json.loads(raw)
+    title = str(data.get("title", "")).strip()[:100]
     summary = str(data["summary"])
     tags = [str(t).lower().strip() for t in data["tags"]][:5]
-    return summary, tags
+    return title, summary, tags
 
 
 # ── Notion helpers ────────────────────────────────────────────────────────────
@@ -173,20 +176,6 @@ def add_entry(token: str, db_id: str, url: str, title: str, summary: str, tags: 
 
 # ── Core logic (shared by CLI and server) ─────────────────────────────────────
 
-def short_title(text: str, max_words: int = 8) -> str:
-    """Trim text to a short title of max_words words."""
-    words = text.split()
-    title = " ".join(words[:max_words])
-    if len(words) > max_words:
-        title += "..."
-    return title
-
-
-def page_title(url: str, summary: str) -> str:
-    """Generate a short readable title from the URL domain + trimmed summary."""
-    domain = re.sub(r"^www\.", "", url.split("/")[2].lower())
-    return f"{domain} — {short_title(summary)}"
-
 
 def save_url(url: str) -> dict:
     """Fetch, summarize, and save a URL. Returns {"summary", "tags", "notion_url"}."""
@@ -202,7 +191,7 @@ def save_url(url: str) -> dict:
         raise ValueError("GEMINI_API_KEY is not set.")
 
     text = fetch_text(url)
-    summary, tags = summarize(text, gemini_key)
+    title, summary, tags = summarize(text, gemini_key)
 
     db_id = find_database(notion_token, "Link Library")
     if not db_id:
@@ -212,7 +201,6 @@ def save_url(url: str) -> dict:
             )
         db_id = create_database(notion_token, parent_page_id)
 
-    title = page_title(url, summary)
     notion_url = add_entry(notion_token, db_id, url, title, summary, tags)
 
     return {"summary": summary, "tags": tags, "notion_url": notion_url}
@@ -231,8 +219,7 @@ def save_text(text: str) -> dict:
     if not gemini_key:
         raise ValueError("GEMINI_API_KEY is not set.")
 
-    summary, tags = summarize(text[:8000], gemini_key)
-    title = short_title(summary)
+    title, summary, tags = summarize(text[:8000], gemini_key)
 
     db_id = find_database(notion_token, "Link Library")
     if not db_id:
