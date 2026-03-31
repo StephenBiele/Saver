@@ -66,19 +66,39 @@ def extract_text(html: str) -> str:
 
 BLOCKED_DOMAINS = {"x.com", "twitter.com", "instagram.com", "facebook.com"}
 
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
+
+
+def _fetch_url(url: str) -> requests.Response:
+    return requests.get(url, headers=BROWSER_HEADERS, timeout=15, verify=False, allow_redirects=True)
+
+
 def fetch_text(url: str, max_chars: int = 8000) -> tuple:
-    """Returns (text, final_url) after following redirects."""
+    """Returns (text, final_url) after following redirects. Falls back to archive.ph if blocked."""
     if not url.startswith("http"):
         url = "https://" + url
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-    }
-    r = requests.get(url, headers=headers, timeout=15, verify=False, allow_redirects=True)
-    final_url = r.url  # URL after all redirects
+
+    r = _fetch_url(url)
+    final_url = r.url
+
+    # If blocked, try archive.ph
     if r.status_code in (401, 403, 429):
-        return f"URL: {final_url}\nNote: Could not access page content (blocked). Summarize based on the URL alone.", final_url
+        try:
+            archive_url = f"https://archive.ph/{final_url}"
+            ar = _fetch_url(archive_url)
+            if ar.ok:
+                text = extract_text(ar.text)[:max_chars]
+                if len(text) > 200:  # archive has real content
+                    return text, final_url
+        except Exception:
+            pass
+        # Fall back to URL-only summary
+        return f"URL: {final_url}\nNote: Could not access page content. Summarize based on the URL alone.", final_url
+
     r.raise_for_status()
     domain = re.sub(r"^www\.", "", final_url.split("/")[2].lower())
     if domain in BLOCKED_DOMAINS:
