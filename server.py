@@ -2,6 +2,7 @@
 """server.py — Tiny Flask API so you can save URLs from anywhere (e.g. Android)."""
 
 import os, sys, re
+from urllib.parse import unquote
 from saver import save_url, save_text, load_dotenv
 
 try:
@@ -31,16 +32,20 @@ def save():
     if not raw:
         return jsonify({"error": "missing 'url' parameter"}), 400
 
+    # Decode any double URL-encoding (e.g. https%3A%2F%2F → https://)
+    raw = unquote(raw)
+
     # Try to extract a URL from the shared text
-    url_match = re.search(r'https?://\S+', raw)
+    url_match = re.search(r'https?://[^\s\)\]\>\"\']+', raw)
     try:
         if url_match:
-            result = save_url(url_match.group(0))
+            result = save_url(url_match.group(0).rstrip('.,;:!?'))
         else:
             result = save_text(raw)
+        result["debug_raw"] = raw[:200]
         return jsonify(result), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "debug_raw": raw[:200]}), 500
 
 
 @app.get("/health")
