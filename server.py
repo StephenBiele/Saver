@@ -15,7 +15,7 @@ app = Flask(__name__)
 
 # Optional: a shared secret to prevent random people from using your endpoint.
 # Set SERVER_SECRET in .env — if unset, the endpoint is open.
-SECRET = os.environ.get("SERVER_SECRET", "")
+SECRET = os.environ.get("SERVER_SECRET", "").strip()
 
 
 @app.post("/save")
@@ -41,6 +41,11 @@ def save():
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"}), 200
+
+
+@app.get("/debug-secret")
+def debug_secret():
+    return jsonify({"secret_len": len(SECRET), "secret_repr": repr(SECRET)}), 200
 
 
 if __name__ == "__main__":
