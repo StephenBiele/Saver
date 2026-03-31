@@ -70,9 +70,15 @@ def fetch_text(url: str, max_chars: int = 8000) -> tuple:
     """Returns (text, final_url) after following redirects."""
     if not url.startswith("http"):
         url = "https://" + url
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; saver-bot/1.0)"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    }
     r = requests.get(url, headers=headers, timeout=15, verify=False, allow_redirects=True)
     final_url = r.url  # URL after all redirects
+    if r.status_code in (401, 403, 429):
+        return f"URL: {final_url}\nNote: Could not access page content (blocked). Summarize based on the URL alone.", final_url
     r.raise_for_status()
     domain = re.sub(r"^www\.", "", final_url.split("/")[2].lower())
     if domain in BLOCKED_DOMAINS:
