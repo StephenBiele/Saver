@@ -205,9 +205,10 @@ def save_url(url: str) -> dict:
             )
         db_id = create_database(notion_token, parent_page_id)
 
-    notion_url = add_entry(notion_token, db_id, final_url.strip(), title, summary, tags)
+    clean_url = final_url.strip().split("?")[0].split("#")[0]  # strip tracking params
+    notion_url = add_entry(notion_token, db_id, clean_url, title, summary, tags)
 
-    return {"summary": summary, "tags": tags, "notion_url": notion_url, "source": final_url}
+    return {"summary": summary, "tags": tags, "notion_url": notion_url, "source": clean_url}
 
 
 def save_text(text: str) -> dict:
