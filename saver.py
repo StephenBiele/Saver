@@ -163,7 +163,7 @@ def add_entry(token: str, db_id: str, url: str, title: str, summary: str, tags: 
     body = {
         "parent": {"database_id": db_id},
         "properties": {
-            "URL":        {"title": [{"text": {"content": title}}]},
+            "Title":      {"title": [{"text": {"content": title}}]},
             "Summary":    {"rich_text": [{"text": {"content": summary}}]},
             "Tags":       {"multi_select": [{"name": t} for t in tags]},
             "Source":     {"url": source},
