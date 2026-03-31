@@ -66,19 +66,21 @@ def extract_text(html: str) -> str:
 
 BLOCKED_DOMAINS = {"x.com", "twitter.com", "instagram.com", "facebook.com"}
 
-def fetch_text(url: str, max_chars: int = 8000) -> str:
+def fetch_text(url: str, max_chars: int = 8000) -> tuple:
+    """Returns (text, final_url) after following redirects."""
     if not url.startswith("http"):
         url = "https://" + url
-    domain = re.sub(r"^www\.", "", url.split("/")[2].lower())
-    if domain in BLOCKED_DOMAINS:
-        return f"URL: {url}\nNote: This is a {domain} link. Summarize based on the URL alone."
     headers = {"User-Agent": "Mozilla/5.0 (compatible; saver-bot/1.0)"}
-    r = requests.get(url, headers=headers, timeout=15, verify=False)
+    r = requests.get(url, headers=headers, timeout=15, verify=False, allow_redirects=True)
+    final_url = r.url  # URL after all redirects
     r.raise_for_status()
+    domain = re.sub(r"^www\.", "", final_url.split("/")[2].lower())
+    if domain in BLOCKED_DOMAINS:
+        return f"URL: {final_url}\nNote: This is a {domain} link. Summarize based on the URL alone.", final_url
     ct = r.headers.get("content-type", "")
     if "html" in ct:
-        return extract_text(r.text)[:max_chars]
-    return r.text[:max_chars]
+        return extract_text(r.text)[:max_chars], final_url
+    return r.text[:max_chars], final_url
 
 
 # ── Gemini Flash ──────────────────────────────────────────────────────────────
@@ -192,7 +194,7 @@ def save_url(url: str) -> dict:
     if not gemini_key:
         raise ValueError("GEMINI_API_KEY is not set.")
 
-    text = fetch_text(url)
+    text, final_url = fetch_text(url)
     title, summary, tags = summarize(text, gemini_key)
 
     db_id = os.environ.get("NOTION_DATABASE_ID") or find_database(notion_token, "Link Library")
@@ -203,10 +205,9 @@ def save_url(url: str) -> dict:
             )
         db_id = create_database(notion_token, parent_page_id)
 
-    url = url.strip()
-    notion_url = add_entry(notion_token, db_id, url, title, summary, tags)
+    notion_url = add_entry(notion_token, db_id, final_url.strip(), title, summary, tags)
 
-    return {"summary": summary, "tags": tags, "notion_url": notion_url, "source": url}
+    return {"summary": summary, "tags": tags, "notion_url": notion_url, "source": final_url}
 
 
 def save_text(text: str) -> dict:
