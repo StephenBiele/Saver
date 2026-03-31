@@ -23,7 +23,12 @@ def save():
     if SECRET:
         token = request.headers.get("X-Secret", "")
         if token != SECRET:
-            return jsonify({"error": "unauthorized"}), 401
+            return jsonify({
+                "error": "unauthorized",
+                "secret_repr": repr(SECRET),
+                "token_repr": repr(token),
+                "match": token == SECRET,
+            }), 401
 
     data = request.get_json(silent=True) or {}
     url = data.get("url") or request.form.get("url") or request.args.get("url")
