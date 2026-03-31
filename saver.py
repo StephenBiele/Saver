@@ -64,9 +64,14 @@ def extract_text(html: str) -> str:
 
 # ── Fetch URL ─────────────────────────────────────────────────────────────────
 
+BLOCKED_DOMAINS = {"x.com", "twitter.com", "instagram.com", "facebook.com"}
+
 def fetch_text(url: str, max_chars: int = 8000) -> str:
     if not url.startswith("http"):
         url = "https://" + url
+    domain = re.sub(r"^www\.", "", url.split("/")[2].lower())
+    if domain in BLOCKED_DOMAINS:
+        return f"URL: {url}\nNote: This is a {domain} link. Summarize based on the URL alone."
     headers = {"User-Agent": "Mozilla/5.0 (compatible; saver-bot/1.0)"}
     r = requests.get(url, headers=headers, timeout=15, verify=False)
     r.raise_for_status()
@@ -149,11 +154,11 @@ def create_database(token: str, parent_page_id: str) -> str:
     return r.json()["id"]
 
 
-def add_entry(token: str, db_id: str, url: str, summary: str, tags: list) -> str:
+def add_entry(token: str, db_id: str, url: str, title: str, summary: str, tags: list) -> str:
     body = {
         "parent": {"database_id": db_id},
         "properties": {
-            "URL":        {"title": [{"text": {"content": url}}]},
+            "URL":        {"title": [{"text": {"content": title}}]},
             "Summary":    {"rich_text": [{"text": {"content": summary}}]},
             "Tags":       {"multi_select": [{"name": t} for t in tags]},
             "Source":     {"url": url},
@@ -167,6 +172,14 @@ def add_entry(token: str, db_id: str, url: str, summary: str, tags: list) -> str
 
 
 # ── Core logic (shared by CLI and server) ─────────────────────────────────────
+
+def page_title(url: str, summary: str) -> str:
+    """Generate a short readable title from the URL domain + first sentence of summary."""
+    domain = re.sub(r"^www\.", "", url.split("/")[2].lower())
+    first_sentence = summary.split(".")[0].strip()
+    title = f"{domain} — {first_sentence}"
+    return title[:100]
+
 
 def save_url(url: str) -> dict:
     """Fetch, summarize, and save a URL. Returns {"summary", "tags", "notion_url"}."""
@@ -192,7 +205,8 @@ def save_url(url: str) -> dict:
             )
         db_id = create_database(notion_token, parent_page_id)
 
-    notion_url = add_entry(notion_token, db_id, url, summary, tags)
+    title = page_title(url, summary)
+    notion_url = add_entry(notion_token, db_id, url, title, summary, tags)
     return {"summary": summary, "tags": tags, "notion_url": notion_url}
 
 
