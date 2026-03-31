@@ -173,12 +173,19 @@ def add_entry(token: str, db_id: str, url: str, title: str, summary: str, tags: 
 
 # ── Core logic (shared by CLI and server) ─────────────────────────────────────
 
+def short_title(text: str, max_words: int = 8) -> str:
+    """Trim text to a short title of max_words words."""
+    words = text.split()
+    title = " ".join(words[:max_words])
+    if len(words) > max_words:
+        title += "..."
+    return title
+
+
 def page_title(url: str, summary: str) -> str:
-    """Generate a short readable title from the URL domain + first sentence of summary."""
+    """Generate a short readable title from the URL domain + trimmed summary."""
     domain = re.sub(r"^www\.", "", url.split("/")[2].lower())
-    first_sentence = summary.split(".")[0].strip()
-    title = f"{domain} — {first_sentence}"
-    return title[:100]
+    return f"{domain} — {short_title(summary)}"
 
 
 def save_url(url: str) -> dict:
@@ -207,6 +214,7 @@ def save_url(url: str) -> dict:
 
     title = page_title(url, summary)
     notion_url = add_entry(notion_token, db_id, url, title, summary, tags)
+
     return {"summary": summary, "tags": tags, "notion_url": notion_url}
 
 
@@ -224,7 +232,7 @@ def save_text(text: str) -> dict:
         raise ValueError("GEMINI_API_KEY is not set.")
 
     summary, tags = summarize(text[:8000], gemini_key)
-    title = summary.split(".")[0].strip()[:100]
+    title = short_title(summary)
 
     db_id = find_database(notion_token, "Link Library")
     if not db_id:
@@ -232,7 +240,7 @@ def save_text(text: str) -> dict:
             raise ValueError("'Link Library' database not found and NOTION_PARENT_PAGE_ID is not set.")
         db_id = create_database(notion_token, parent_page_id)
 
-    notion_url = add_entry(notion_token, db_id, "N/A", title, summary, tags)
+    notion_url = add_entry(notion_token, db_id, "Note", title, summary, tags)
     return {"summary": summary, "tags": tags, "notion_url": notion_url}
 
 
