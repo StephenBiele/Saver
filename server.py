@@ -45,7 +45,13 @@ def health():
 
 @app.get("/debug-secret")
 def debug_secret():
-    return jsonify({"secret_len": len(SECRET), "secret_repr": repr(SECRET)}), 200
+    token = request.headers.get("X-Secret", "")
+    return jsonify({
+        "secret_len": len(SECRET),
+        "secret_repr": repr(SECRET),
+        "received_token_repr": repr(token),
+        "match": token == SECRET,
+    }), 200
 
 
 if __name__ == "__main__":
