@@ -77,8 +77,8 @@ def _fetch_url(url: str) -> requests.Response:
     return requests.get(url, headers=BROWSER_HEADERS, timeout=15, verify=False, allow_redirects=True)
 
 
-def fetch_text(url: str, max_chars: int = 8000) -> tuple:
-    """Returns (text, final_url) after following redirects. Falls back to archive.ph if blocked."""
+def fetch_text(url: str, max_chars: int = 30000) -> tuple:
+    """Returns (full_text, truncated_text, final_url). full_text for reading time, truncated for Gemini."""
     if not url.startswith("http"):
         url = "https://" + url
 
@@ -88,30 +88,39 @@ def fetch_text(url: str, max_chars: int = 8000) -> tuple:
     # If blocked, try archive.ph
     if r.status_code in (401, 403, 429):
         try:
-            archive_url = f"https://archive.ph/{final_url}"
-            ar = _fetch_url(archive_url)
+            ar = _fetch_url(f"https://archive.ph/{final_url}")
             if ar.ok:
-                text = extract_text(ar.text)[:max_chars]
-                if len(text) > 200:  # archive has real content
-                    return text, final_url
+                text = extract_text(ar.text)
+                if len(text) > 200:
+                    return text, text[:8000], final_url
         except Exception:
             pass
-        # Fall back to URL-only summary
-        return f"URL: {final_url}\nNote: Could not access page content. Summarize based on the URL alone.", final_url
+        fallback = f"URL: {final_url}\nNote: Could not access page content. Summarize based on the URL alone."
+        return fallback, fallback, final_url
 
     r.raise_for_status()
     domain = re.sub(r"^www\.", "", final_url.split("/")[2].lower())
     if domain in BLOCKED_DOMAINS:
-        return f"URL: {final_url}\nNote: This is a {domain} link. Summarize based on the URL alone.", final_url
+        fallback = f"URL: {final_url}\nNote: This is a {domain} link. Summarize based on the URL alone."
+        return fallback, fallback, final_url
+
     ct = r.headers.get("content-type", "")
     if "html" in ct:
-        return extract_text(r.text)[:max_chars], final_url
-    return r.text[:max_chars], final_url
+        full_text = extract_text(r.text)
+        return full_text, full_text[:8000], final_url
+    return r.text, r.text[:8000], final_url
+
+
+def reading_time(text: str) -> str:
+    words = len(text.split())
+    minutes = max(1, round(words / 200))
+    return f"{minutes} min read"
 
 
 # ── Gemini Flash ──────────────────────────────────────────────────────────────
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"
+
 
 def summarize(text: str, api_key: str):
     prompt = (
@@ -172,11 +181,13 @@ def create_database(token: str, parent_page_id: str) -> str:
         "parent": {"type": "page_id", "page_id": parent_page_id},
         "title": [{"type": "text", "text": {"content": "Link Library"}}],
         "properties": {
-            "URL":        {"title": {}},
+            "Title":      {"title": {}},
             "Summary":    {"rich_text": {}},
             "Tags":       {"multi_select": {}},
             "Source":     {"url": {}},
             "Date Saved": {"date": {}},
+            "Read Time":  {"rich_text": {}},
+            "Read":       {"checkbox": {}},
         },
     }
     r = requests.post(f"{NOTION_BASE}/databases", headers=_notion_headers(token), json=body)
@@ -185,8 +196,21 @@ def create_database(token: str, parent_page_id: str) -> str:
     return r.json()["id"]
 
 
-def add_entry(token: str, db_id: str, url: str, title: str, summary: str, tags: list) -> str:
-    # Notion URL field requires a valid URL or null
+def find_duplicate(token: str, db_id: str, clean_url: str) -> Optional[str]:
+    """Return existing Notion page URL if this source URL was already saved."""
+    r = requests.post(
+        f"{NOTION_BASE}/databases/{db_id}/query",
+        headers=_notion_headers(token),
+        json={"filter": {"property": "Source", "url": {"equals": clean_url}}},
+    )
+    r.raise_for_status()
+    results = r.json().get("results", [])
+    return results[0].get("url") if results else None
+
+
+def add_entry(token: str, db_id: str, url: str, title: str, summary: str,
+              tags: list, read_time: str = "") -> tuple:
+    """Create a Notion page and return (notion_url, page_id)."""
     source = url if url.startswith("http") else None
     body = {
         "parent": {"database_id": db_id},
@@ -196,70 +220,104 @@ def add_entry(token: str, db_id: str, url: str, title: str, summary: str, tags: 
             "Tags":       {"multi_select": [{"name": t} for t in tags]},
             "Source":     {"url": source},
             "Date Saved": {"date": {"start": date.today().isoformat()}},
+            "Read Time":  {"rich_text": [{"text": {"content": read_time}}]},
+            "Read":       {"checkbox": False},
         },
     }
     r = requests.post(f"{NOTION_BASE}/pages", headers=_notion_headers(token), json=body)
     if not r.ok:
         raise RuntimeError(f"Failed to add entry: {r.status_code} {r.text}")
-    return r.json().get("url", "")
+    page = r.json()
+    return page.get("url", ""), page.get("id", "")
+
+
+def append_article(token: str, page_id: str, text: str):
+    """Append the full article text as paragraph blocks inside the Notion page."""
+    # Split into 1900-char chunks (Notion block limit is 2000 chars)
+    chunks = [text[i:i+1900] for i in range(0, min(len(text), max_chars := 50000), 1900)][:50]
+    blocks = [
+        {"object": "block", "type": "paragraph",
+         "paragraph": {"rich_text": [{"type": "text", "text": {"content": chunk}}]}}
+        for chunk in chunks
+    ]
+    r = requests.patch(
+        f"{NOTION_BASE}/blocks/{page_id}/children",
+        headers=_notion_headers(token),
+        json={"children": blocks},
+    )
+    if not r.ok:
+        raise RuntimeError(f"Failed to append article: {r.status_code} {r.text}")
 
 
 # ── Core logic (shared by CLI and server) ─────────────────────────────────────
 
-
-def save_url(url: str) -> dict:
-    """Fetch, summarize, and save a URL. Returns {"summary", "tags", "notion_url"}."""
+def _get_env():
     load_dotenv()
-
     notion_token   = os.environ.get("NOTION_TOKEN")
     parent_page_id = os.environ.get("NOTION_PARENT_PAGE_ID", "").strip() or None
     gemini_key     = os.environ.get("GEMINI_API_KEY")
-
+    db_id          = os.environ.get("NOTION_DATABASE_ID")
     if not notion_token:
         raise ValueError("NOTION_TOKEN is not set.")
     if not gemini_key:
         raise ValueError("GEMINI_API_KEY is not set.")
+    return notion_token, parent_page_id, gemini_key, db_id
 
-    text, final_url = fetch_text(url)
-    title, summary, tags = summarize(text, gemini_key)
 
-    db_id = os.environ.get("NOTION_DATABASE_ID") or find_database(notion_token, "Link Library")
+def _get_or_create_db(notion_token, db_id, parent_page_id):
     if not db_id:
-        if not parent_page_id:
-            raise ValueError(
-                "'Link Library' database not found and NOTION_PARENT_PAGE_ID is not set."
-            )
-        db_id = create_database(notion_token, parent_page_id)
-
-    clean_url = final_url.strip().split("?")[0].split("#")[0]  # strip tracking params
-    notion_url = add_entry(notion_token, db_id, clean_url, title, summary, tags)
-
-    return {"summary": summary, "tags": tags, "notion_url": notion_url, "source": clean_url}
-
-
-def save_text(text: str) -> dict:
-    """Summarize and save plain text directly to Notion (no URL to fetch)."""
-    load_dotenv()
-
-    notion_token   = os.environ.get("NOTION_TOKEN")
-    parent_page_id = os.environ.get("NOTION_PARENT_PAGE_ID", "").strip() or None
-    gemini_key     = os.environ.get("GEMINI_API_KEY")
-
-    if not notion_token:
-        raise ValueError("NOTION_TOKEN is not set.")
-    if not gemini_key:
-        raise ValueError("GEMINI_API_KEY is not set.")
-
-    title, summary, tags = summarize(text[:8000], gemini_key)
-
-    db_id = os.environ.get("NOTION_DATABASE_ID") or find_database(notion_token, "Link Library")
+        db_id = find_database(notion_token, "Link Library")
     if not db_id:
         if not parent_page_id:
             raise ValueError("'Link Library' database not found and NOTION_PARENT_PAGE_ID is not set.")
         db_id = create_database(notion_token, parent_page_id)
+    return db_id
 
-    notion_url = add_entry(notion_token, db_id, "Note", title, summary, tags)
-    return {"summary": summary, "tags": tags, "notion_url": notion_url}
+
+def save_url(url: str) -> dict:
+    """Fetch, summarize, and save a URL. Returns result dict."""
+    notion_token, parent_page_id, gemini_key, db_id = _get_env()
+    db_id = _get_or_create_db(notion_token, db_id, parent_page_id)
+
+    full_text, short_text, final_url = fetch_text(url)
+    clean_url = final_url.strip().split("?")[0].split("#")[0]
+
+    # Duplicate detection
+    existing = find_duplicate(notion_token, db_id, clean_url)
+    if existing:
+        return {"duplicate": True, "notion_url": existing, "message": f"Already saved: {clean_url}"}
+
+    read_time_str = reading_time(full_text)
+    title, summary, tags = summarize(short_text, gemini_key)
+    notion_url, page_id = add_entry(notion_token, db_id, clean_url, title, summary, tags, read_time_str)
+
+    # Append full article as page content
+    if page_id and len(full_text) > 200:
+        try:
+            append_article(notion_token, page_id, full_text)
+        except Exception:
+            pass  # Don't fail the save if article append fails
+
+    return {"summary": summary, "tags": tags, "notion_url": notion_url,
+            "source": clean_url, "read_time": read_time_str}
+
+
+def save_text(text: str) -> dict:
+    """Summarize and save plain text directly to Notion (no URL to fetch)."""
+    notion_token, parent_page_id, gemini_key, db_id = _get_env()
+    db_id = _get_or_create_db(notion_token, db_id, parent_page_id)
+
+    read_time_str = reading_time(text)
+    title, summary, tags = summarize(text[:8000], gemini_key)
+    notion_url, page_id = add_entry(notion_token, db_id, "Note", title, summary, tags, read_time_str)
+
+    if page_id and len(text) > 200:
+        try:
+            append_article(notion_token, page_id, text)
+        except Exception:
+            pass
+
+    return {"summary": summary, "tags": tags, "notion_url": notion_url, "read_time": read_time_str}
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -277,8 +335,13 @@ def main():
     except Exception as e:
         sys.exit(f"Error: {e}")
 
-    print(f"  Summary : {result['summary'][:100]}{'...' if len(result['summary']) > 100 else ''}")
-    print(f"  Tags    : {', '.join(result['tags'])}")
+    if result.get("duplicate"):
+        print(f"Already saved! {result['notion_url']}")
+        return
+
+    print(f"  Summary   : {result['summary'][:100]}{'...' if len(result['summary']) > 100 else ''}")
+    print(f"  Tags      : {', '.join(result['tags'])}")
+    print(f"  Read time : {result['read_time']}")
     print(f"\nSaved! {result['notion_url']}")
 
 
