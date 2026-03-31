@@ -44,6 +44,7 @@ def health():
 
 
 @app.get("/debug-secret")
+@app.post("/debug-secret")
 def debug_secret():
     token = request.headers.get("X-Secret", "")
     return jsonify({
@@ -51,6 +52,7 @@ def debug_secret():
         "secret_repr": repr(SECRET),
         "received_token_repr": repr(token),
         "match": token == SECRET,
+        "method": request.method,
     }), 200
 
 
