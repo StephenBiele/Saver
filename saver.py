@@ -195,7 +195,7 @@ def save_url(url: str) -> dict:
     text = fetch_text(url)
     title, summary, tags = summarize(text, gemini_key)
 
-    db_id = find_database(notion_token, "Link Library")
+    db_id = os.environ.get("NOTION_DATABASE_ID") or find_database(notion_token, "Link Library")
     if not db_id:
         if not parent_page_id:
             raise ValueError(
@@ -223,7 +223,7 @@ def save_text(text: str) -> dict:
 
     title, summary, tags = summarize(text[:8000], gemini_key)
 
-    db_id = find_database(notion_token, "Link Library")
+    db_id = os.environ.get("NOTION_DATABASE_ID") or find_database(notion_token, "Link Library")
     if not db_id:
         if not parent_page_id:
             raise ValueError("'Link Library' database not found and NOTION_PARENT_PAGE_ID is not set.")
