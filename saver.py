@@ -153,24 +153,26 @@ def create_database(token: str, parent_page_id: str) -> str:
     }
     r = requests.post(f"{NOTION_BASE}/databases", headers=_notion_headers(token), json=body)
     if not r.ok:
-        sys.exit(f"Failed to create database: {r.status_code} {r.text}")
+        raise RuntimeError(f"Failed to create database: {r.status_code} {r.text}")
     return r.json()["id"]
 
 
 def add_entry(token: str, db_id: str, url: str, title: str, summary: str, tags: list) -> str:
+    # Notion URL field requires a valid URL or null
+    source = url if url.startswith("http") else None
     body = {
         "parent": {"database_id": db_id},
         "properties": {
             "URL":        {"title": [{"text": {"content": title}}]},
             "Summary":    {"rich_text": [{"text": {"content": summary}}]},
             "Tags":       {"multi_select": [{"name": t} for t in tags]},
-            "Source":     {"url": url},
+            "Source":     {"url": source},
             "Date Saved": {"date": {"start": date.today().isoformat()}},
         },
     }
     r = requests.post(f"{NOTION_BASE}/pages", headers=_notion_headers(token), json=body)
     if not r.ok:
-        sys.exit(f"Failed to add entry: {r.status_code} {r.text}")
+        raise RuntimeError(f"Failed to add entry: {r.status_code} {r.text}")
     return r.json().get("url", "")
 
 
