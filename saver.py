@@ -210,6 +210,32 @@ def save_url(url: str) -> dict:
     return {"summary": summary, "tags": tags, "notion_url": notion_url}
 
 
+def save_text(text: str) -> dict:
+    """Summarize and save plain text directly to Notion (no URL to fetch)."""
+    load_dotenv()
+
+    notion_token   = os.environ.get("NOTION_TOKEN")
+    parent_page_id = os.environ.get("NOTION_PARENT_PAGE_ID", "").strip() or None
+    gemini_key     = os.environ.get("GEMINI_API_KEY")
+
+    if not notion_token:
+        raise ValueError("NOTION_TOKEN is not set.")
+    if not gemini_key:
+        raise ValueError("GEMINI_API_KEY is not set.")
+
+    summary, tags = summarize(text[:8000], gemini_key)
+    title = summary.split(".")[0].strip()[:100]
+
+    db_id = find_database(notion_token, "Link Library")
+    if not db_id:
+        if not parent_page_id:
+            raise ValueError("'Link Library' database not found and NOTION_PARENT_PAGE_ID is not set.")
+        db_id = create_database(notion_token, parent_page_id)
+
+    notion_url = add_entry(notion_token, db_id, "N/A", title, summary, tags)
+    return {"summary": summary, "tags": tags, "notion_url": notion_url}
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():

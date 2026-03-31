@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """server.py — Tiny Flask API so you can save URLs from anywhere (e.g. Android)."""
 
-import os, sys
-from saver import save_url, load_dotenv
+import os, sys, re
+from saver import save_url, save_text, load_dotenv
 
 try:
     from flask import Flask, request, jsonify
@@ -26,13 +26,18 @@ def save():
             return jsonify({"error": "unauthorized"}), 401
 
     data = request.get_json(silent=True) or {}
-    url = data.get("url") or request.form.get("url") or request.args.get("url")
+    raw = data.get("url") or request.form.get("url") or request.args.get("url")
 
-    if not url:
+    if not raw:
         return jsonify({"error": "missing 'url' parameter"}), 400
 
+    # Try to extract a URL from the shared text
+    url_match = re.search(r'https?://\S+', raw)
     try:
-        result = save_url(url)
+        if url_match:
+            result = save_url(url_match.group(0))
+        else:
+            result = save_text(raw)
         return jsonify(result), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
