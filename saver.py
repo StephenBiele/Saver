@@ -74,7 +74,7 @@ BROWSER_HEADERS = {
 
 
 def _fetch_url(url: str) -> requests.Response:
-    return requests.get(url, headers=BROWSER_HEADERS, timeout=15, verify=False, allow_redirects=True)
+    return requests.get(url, headers=BROWSER_HEADERS, timeout=15, verify=True, allow_redirects=True)
 
 
 def fetch_text(url: str, max_chars: int = 30000) -> tuple:
