@@ -122,6 +122,25 @@ def reading_time(text: str) -> str:
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"
 
 
+def clean_article(raw_text: str, api_key: str) -> str:
+    """Ask Gemini to extract only the main article body, removing nav/ads/comments."""
+    prompt = (
+        "The following is raw text scraped from a webpage. It contains a mix of "
+        "navigation menus, ads, author bios, comments, and the actual article content.\n\n"
+        "Extract and return ONLY the main article body text. "
+        "Remove all navigation, ads, related articles, author bios, comments, and boilerplate. "
+        "Return plain text only — no markdown, no headings, no explanation.\n\n"
+        f"Raw text:\n{raw_text[:12000]}"
+    )
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.1},
+    }
+    r = requests.post(GEMINI_URL, params={"key": api_key}, json=payload, timeout=60)
+    r.raise_for_status()
+    return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+
 def summarize(text: str, api_key: str):
     prompt = (
         "You are a helpful assistant. Given the following web page content, "
@@ -286,6 +305,11 @@ def save_url(url: str) -> dict:
     existing = find_duplicate(notion_token, db_id, clean_url)
     if existing:
         return {"duplicate": True, "notion_url": existing, "message": f"Already saved: {clean_url}"}
+
+    # Clean raw scrape before summarizing and storing
+    if len(short_text) > 500 and not short_text.startswith("URL:"):
+        short_text = clean_article(short_text, gemini_key)
+        full_text = short_text  # use cleaned version for article body too
 
     read_time_str = reading_time(full_text)
     title, summary, tags = summarize(short_text, gemini_key)
