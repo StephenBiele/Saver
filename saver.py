@@ -234,7 +234,7 @@ def add_entry(token: str, db_id: str, url: str, title: str, summary: str,
 def append_article(token: str, page_id: str, text: str):
     """Append the full article text as paragraph blocks inside the Notion page."""
     # Split into 1900-char chunks (Notion block limit is 2000 chars)
-    chunks = [text[i:i+1900] for i in range(0, min(len(text), max_chars := 50000), 1900)][:50]
+    chunks = [text[i:i+1900] for i in range(0, min(len(text), 50000), 1900)][:50]
     blocks = [
         {"object": "block", "type": "paragraph",
          "paragraph": {"rich_text": [{"type": "text", "text": {"content": chunk}}]}}
