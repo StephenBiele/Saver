@@ -1,0 +1,14 @@
+[Unit]
+Description=LinkSaver Flask Server
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Saver
+ExecStart=/usr/bin/python3 /home/pi/Saver/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
